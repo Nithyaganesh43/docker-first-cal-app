@@ -1,25 +1,42 @@
+version: "3.9"
+
 services:
   backend:
-    build: ./backend
-    ports:
-      - "5000:5000"
+    image: nithyaganesh4343/backend:latest
     environment:
-      - PORT=5000
-      - MONGO_URI=mongodb://mongo:27017
-      - DB_NAME=calculator
+      PORT: 5000
+      MONGO_URI: mongodb://admin:strongpassword@mongo:27017/calculator?authSource=admin
     depends_on:
       - mongo
+    networks:
+      - app-network
+    restart: always
+
   mongo:
     image: mongo:6
     environment:
-      - MONGO_INITDB_DATABASE=calculator
+      MONGO_INITDB_DATABASE: calculator
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: strongpassword
     volumes:
       - mongo-data:/data/db
+    networks:
+      - app-network
+    restart: always
+
   frontend:
-    build: ./frontend
+    image: nithyaganesh4343/frontend:latest
     ports:
-      - "3000:80" 
+      - "80:80"    
     depends_on:
       - backend
+    networks:
+      - app-network
+    restart: always
+
 volumes:
   mongo-data:
+
+networks:
+  app-network:
+    driver: bridge
