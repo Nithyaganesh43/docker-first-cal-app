@@ -19,10 +19,10 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build backend image
-        run: docker build -t nithyaganesh4343/backend:latest ./backend
+        run: docker build -t nithyaganesh4343/backend:latest ./Backend
 
       - name: Build frontend image
-        run: docker build -t nithyaganesh4343/frontend:latest ./frontend
+        run: docker build -t nithyaganesh4343/frontend:latest ./Frontend
 
       - name: Push backend image
         run: docker push nithyaganesh4343/backend:latest
