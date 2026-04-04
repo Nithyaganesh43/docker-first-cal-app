@@ -1,8 +1,6 @@
 const express = require('express');
 const { MongoClient } = require('mongodb');
 const cors = require('cors');
-const app = express();
-app.use(express.json());
 
 const PORT =  5000;
 const MONGODB_URI = process.env.MONGO_URI || 'mongodb://mongo:27017';
@@ -11,76 +9,204 @@ const COLLECTION_NAME = process.env.COLLECTION_NAME || 'addition_history';
 
 let historyCollection;
 
-corsOptions = {
+const ALLOWED_OPERATIONS = new Set(['+', '-', '*', '/', '%', '^']);
+
+const corsOptions = {
   origin: '*',
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'DELETE'],
   allowedHeaders: ['Content-Type'],
 };
-app.use(cors(corsOptions));
+
+function mapHistoryItem(item) {
+  return {
+    id: item._id.toString(),
+    a: item.a,
+    b: item.b,
+    operation: item.operation,
+    expression: item.expression,
+    result: item.result,
+    createdAt: item.createdAt,
+  };
+}
+
+function validateNumber(value, fieldName) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return {
+      error: `${fieldName} must be a valid number.`,
+    };
+  }
+
+  return { value: parsed };
+}
+
+function compute(a, b, operation) {
+  switch (operation) {
+    case '+':
+      return a + b;
+    case '-':
+      return a - b;
+    case '*':
+      return a * b;
+    case '/':
+      if (b === 0) {
+        return { error: 'Cannot divide by zero.' };
+      }
+      return a / b;
+    case '%':
+      if (b === 0) {
+        return { error: 'Cannot use modulo with zero.' };
+      }
+      return a % b;
+    case '^':
+      return a ** b;
+    default:
+      return { error: `Unsupported operation: ${operation}` };
+  }
+}
+
+async function persistCalculation(collection, a, b, operation, result) {
+  const entry = {
+    a,
+    b,
+    operation,
+    expression: `${a} ${operation} ${b}`,
+    result,
+    createdAt: new Date(),
+  };
+
+  const insertResult = await collection.insertOne(entry);
+
+  return {
+    id: insertResult.insertedId.toString(),
+    ...entry,
+  };
+}
 
 /* -------------------- ROUTES -------------------- */
 
-app.post('/add', async (req, res) => {
-  try {
-    const { a, b } = req.body || {};
-    const first = Number(a);
-    const second = Number(b);
+function createApp({ historyCollectionProvider } = {}) {
+  const app = express();
+  app.use(express.json());
+  app.use(cors(corsOptions));
 
-    if (!Number.isFinite(first) || !Number.isFinite(second)) {
-      return res.status(400).json({
-        error: 'Both a and b must be valid numbers.',
-      });
+  const getCollection = historyCollectionProvider || (() => historyCollection);
+
+  function requireCollection() {
+    const collection = getCollection();
+
+    if (!collection) {
+      throw new Error('History collection is not initialized.');
     }
 
-    const result = first + second;
-
-    const entry = {
-      a: first,
-      b: second,
-      result,
-      createdAt: new Date(),
-    };
-
-    const insertResult = await historyCollection.insertOne(entry);
-
-    return res.status(200).json({
-      result,
-      entry: {
-        id: insertResult.insertedId.toString(),
-        ...entry,
-      },
-    });
-  } catch {
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return collection;
   }
-});
 
-app.get('/history', async (_req, res) => {
-  try {
-    const entries = await historyCollection
-      .find({})
-      .sort({ createdAt: -1 })
-      .toArray();
+  app.post('/add', async (req, res) => {
+    try {
+      const { a, b } = req.body || {};
+      const firstParsed = validateNumber(a, 'a');
+      const secondParsed = validateNumber(b, 'b');
 
-    return res.status(200).json({
-      history: entries.map((item) => ({
-        id: item._id.toString(),
-        a: item.a,
-        b: item.b,
-        result: item.result,
-        createdAt: item.createdAt,
-      })),
-    });
-  } catch {
-    return res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
+      if (firstParsed.error || secondParsed.error) {
+        return res.status(400).json({
+          error: firstParsed.error || secondParsed.error,
+        });
+      }
 
-app.use((req, res) => {
-  res.status(404).json({
-    error: 'Endpoint not found.',
+      const first = firstParsed.value;
+      const second = secondParsed.value;
+      const result = compute(first, second, '+');
+      const collection = requireCollection();
+      const entry = await persistCalculation(collection, first, second, '+', result);
+
+      return res.status(200).json({
+        result,
+        entry,
+      });
+    } catch {
+      return res.status(500).json({ error: 'Internal Server Error' });
+    }
   });
-});
+
+  app.post('/calculate', async (req, res) => {
+    try {
+      const { a, b, operation } = req.body || {};
+      const firstParsed = validateNumber(a, 'a');
+      const secondParsed = validateNumber(b, 'b');
+
+      if (firstParsed.error || secondParsed.error) {
+        return res.status(400).json({
+          error: firstParsed.error || secondParsed.error,
+        });
+      }
+
+      if (!ALLOWED_OPERATIONS.has(operation)) {
+        return res.status(400).json({
+          error: 'Operation must be one of +, -, *, /, %, ^.',
+        });
+      }
+
+      const first = firstParsed.value;
+      const second = secondParsed.value;
+      const result = compute(first, second, operation);
+
+      if (typeof result === 'object' && result.error) {
+        return res.status(400).json(result);
+      }
+
+      const collection = requireCollection();
+      const entry = await persistCalculation(collection, first, second, operation, result);
+
+      return res.status(200).json({
+        result,
+        entry,
+      });
+    } catch {
+      return res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
+
+  app.get('/history', async (_req, res) => {
+    try {
+      const collection = requireCollection();
+      const entries = await collection
+        .find({})
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      return res.status(200).json({
+        history: entries.map(mapHistoryItem),
+      });
+    } catch {
+      return res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
+
+  app.delete('/history', async (_req, res) => {
+    try {
+      const collection = requireCollection();
+      const deleteResult = await collection.deleteMany({});
+
+      return res.status(200).json({
+        deletedCount: deleteResult.deletedCount,
+      });
+    } catch {
+      return res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
+
+  app.use((req, res) => {
+    res.status(404).json({
+      error: 'Endpoint not found.',
+    });
+  });
+
+  return app;
+}
+
+const app = createApp();
 
 /* -------------------- DB CONNECTION -------------------- */
 
@@ -115,7 +241,19 @@ async function startServer() {
   });
 }
 
-startServer().catch(() => {
-  console.error('Startup failed');
-  process.exit(1);
-});
+if (require.main === module) {
+  startServer().catch(() => {
+    console.error('Startup failed');
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  createApp,
+  startServer,
+  connectWithRetry,
+  compute,
+  validateNumber,
+  mapHistoryItem,
+  ALLOWED_OPERATIONS,
+};

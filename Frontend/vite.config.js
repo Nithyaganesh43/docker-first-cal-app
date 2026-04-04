@@ -6,8 +6,11 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     proxy: {
-      '/add': 'http://backend:5000',
-      '/history': 'http://backend:5000',
+      '/api': {
+        target: 'http://backend:5000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
     },
   },
 })
