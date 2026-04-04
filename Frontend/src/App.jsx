@@ -62,7 +62,7 @@ function App() {
   return (
     <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center p-4">
       <div className="w-full max-w-xl rounded-2xl border border-gray-800 bg-gray-900 p-6 space-y-6">
-        <h1 className="text-2xl font-bold">Addition Calculator</h1>
+        <h1 className="text-2xl font-bold">Addition Calculator !</h1>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
