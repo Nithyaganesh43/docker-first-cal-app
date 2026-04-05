@@ -3,9 +3,8 @@ version: "3.9"
 services:
   backend:
     image: nithyaganesh4343/backend:latest
-    environment:
-      PORT: 5000
-      MONGO_URI: mongodb://admin:strongpassword@mongo:27017/calculator?authSource=admin
+    env_file:
+      - .env
     depends_on:
       - mongo
     networks:
@@ -14,10 +13,8 @@ services:
 
   mongo:
     image: mongo:6
-    environment:
-      MONGO_INITDB_DATABASE: calculator
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: strongpassword
+    env_file:
+      - .env
     volumes:
       - mongo-data:/data/db
     networks:
@@ -27,7 +24,7 @@ services:
   frontend:
     image: nithyaganesh4343/frontend:latest
     ports:
-      - "80:80"    
+      - "80:80"
     depends_on:
       - backend
     networks:

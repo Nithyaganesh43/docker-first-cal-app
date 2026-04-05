@@ -35,6 +35,7 @@ jobs:
 
   frontend-build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -81,14 +82,20 @@ jobs:
       - name: Push frontend image
         run: docker push nithyaganesh4343/frontend:latest
 
-      - name: Deploy to EC2 
+      - name: Deploy to EC2 (with secrets)
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
-          username: ubuntu
+          username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd ~/docker-first-cal-app
+
+            echo "PORT=${{ secrets.PORT }}" > .env
+            echo "MONGO_URI=${{ secrets.MONGO_URI }}" >> .env
+            echo "MONGO_INITDB_ROOT_USERNAME=${{ secrets.MONGO_INITDB_ROOT_USERNAME }}" >> .env
+            echo "MONGO_INITDB_ROOT_PASSWORD=${{ secrets.MONGO_INITDB_ROOT_PASSWORD }}" >> .env
+            echo "MONGO_INITDB_DATABASE=${{ secrets.MONGO_INITDB_DATABASE }}" >> .env
+
             docker-compose pull
-            docker-compose down
-            docker-compose up -d
+            ddocker-compose up -d --remove-orphans
