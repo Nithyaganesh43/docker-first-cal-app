@@ -16,8 +16,6 @@ const checkEnvVars = () => {
   }
 };
 
-checkEnvVars();
-
 
 let historyCollection;
 
@@ -246,6 +244,7 @@ async function connectWithRetry() {
 /* -------------------- START SERVER -------------------- */
 
 async function startServer() {
+  checkEnvVars();
   await connectWithRetry();
 
   app.listen(PORT,"0.0.0.0", () => {
