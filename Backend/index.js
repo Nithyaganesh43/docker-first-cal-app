@@ -3,9 +3,21 @@ const { MongoClient } = require('mongodb');
 const cors = require('cors');
 
 const PORT =  5000;
-const MONGODB_URI = process.env.MONGO_URI || 'mongodb://mongo:27017';
-const DB_NAME = process.env.DB_NAME || 'calculator';
-const COLLECTION_NAME = process.env.COLLECTION_NAME || 'addition_history';
+const MONGODB_URI = process.env.MONGO_URI
+const DB_NAME = process.env.DB_NAME ;
+const COLLECTION_NAME = process.env.COLLECTION_NAME ;
+
+const checkEnvVars = () => {
+  const requiredVars = ['MONGO_URI', 'DB_NAME', 'COLLECTION_NAME'];
+  const missingVars = requiredVars.filter((varName) => !process.env[varName]);  
+  if (missingVars.length > 0) {
+    console.error(`Error: Missing required environment variables: ${missingVars.join(', ')}`);
+    process.exit(1);
+  }
+};
+
+checkEnvVars();
+
 
 let historyCollection;
 
