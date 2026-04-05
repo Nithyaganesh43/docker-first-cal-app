@@ -98,4 +98,4 @@ jobs:
             echo "MONGO_INITDB_DATABASE=${{ secrets.MONGO_INITDB_DATABASE }}" >> .env
 
             docker-compose pull
-            ddocker-compose up -d --remove-orphans
+            docker-compose up -d --remove-orphans
