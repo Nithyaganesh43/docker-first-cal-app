@@ -92,13 +92,16 @@ jobs:
             # Ensure Docker is running
             sudo systemctl start docker
 
-            # Backup current running containers (for rollback)
-            docker ps -q > previous_containers.txt || true
+            # Backup current image IDs (for rollback)
+            PREV_BACKEND_IMAGE="$(sudo docker inspect --format='{{.Image}}' docker-first-cal-app-backend-1 2>/dev/null || true)"
+            PREV_FRONTEND_IMAGE="$(sudo docker inspect --format='{{.Image}}' docker-first-cal-app-frontend-1 2>/dev/null || true)"
 
             # Create .env safely
             cat <<EOF > .env
             PORT=${{ secrets.PORT }}
             MONGO_URI=${{ secrets.MONGO_URI }}
+            DB_NAME=${{ secrets.MONGO_INITDB_DATABASE }}
+            COLLECTION_NAME=history
             MONGO_INITDB_ROOT_USERNAME=${{ secrets.MONGO_INITDB_ROOT_USERNAME }}
             MONGO_INITDB_ROOT_PASSWORD=${{ secrets.MONGO_INITDB_ROOT_PASSWORD }}
             MONGO_INITDB_DATABASE=${{ secrets.MONGO_INITDB_DATABASE }}
@@ -110,18 +113,38 @@ jobs:
             # Deploy new version
             sudo docker compose up -d --remove-orphans
 
-            echo "⏳ Waiting for services..."
-            sleep 15
+            echo "⏳ Waiting for services and validating health..."
 
-            # Health check (change port if needed)
-            if ! curl -f http://localhost:${{ secrets.PORT }}; then
+            # Health check against exposed frontend route that depends on backend.
+            # Retry because MongoDB/backend may need extra startup time.
+            HEALTH_OK=0
+            for i in $(seq 1 12); do
+              if curl -fsS http://localhost/api/history >/dev/null; then
+                HEALTH_OK=1
+                break
+              fi
+              sleep 5
+            done
+
+            if [ "$HEALTH_OK" -ne 1 ]; then
               echo "❌ Health check failed. Rolling back..."
 
-              # Rollback
-              if [ -s previous_containers.txt ]; then
-                sudo docker stop $(cat previous_containers.txt) || true
-                sudo docker start $(cat previous_containers.txt) || true
+              # Rollback using previously running image IDs.
+              # This only runs when both previous images were detected.
+              if [ -n "$PREV_BACKEND_IMAGE" ] && [ -n "$PREV_FRONTEND_IMAGE" ]; then
+                cat <<EOF > rollback.override.yml
+                services:
+                  backend:
+                    image: $PREV_BACKEND_IMAGE
+                  frontend:
+                    image: $PREV_FRONTEND_IMAGE
+                EOF
+
+                sudo docker compose -f docker-compose.yml -f rollback.override.yml up -d --remove-orphans || true
               fi
+
+              sudo docker compose ps
+              sudo docker compose logs --tail=120 backend frontend mongo || true
 
               exit 1
             fi
