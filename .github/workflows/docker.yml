@@ -10,49 +10,42 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  IMAGE_TAG: ${{ github.sha }}
+
 jobs:
   backend-tests:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: Backend/package-lock.json
 
-      - name: Install backend dependencies
-        working-directory: ./Backend
+      - working-directory: ./Backend
         run: npm ci
 
-      - name: Run backend tests
-        working-directory: ./Backend
+      - working-directory: ./Backend
         run: npm test
 
   frontend-build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: Frontend/package-lock.json
 
-      - name: Install frontend dependencies
-        working-directory: ./Frontend
+      - working-directory: ./Frontend
         run: npm ci
 
-      - name: Build frontend
-        working-directory: ./Frontend
+      - working-directory: ./Frontend
         run: npm run build
 
   build-and-push:
@@ -61,8 +54,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -70,34 +62,68 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build backend image
-        run: docker build -t nithyaganesh4343/backend:latest ./Backend
+      - name: Build & Push Backend
+        run: |
+          docker build -t nithyaganesh4343/backend:${IMAGE_TAG} ./Backend
+          docker tag nithyaganesh4343/backend:${IMAGE_TAG} nithyaganesh4343/backend:latest
+          docker push nithyaganesh4343/backend:${IMAGE_TAG}
+          docker push nithyaganesh4343/backend:latest
 
-      - name: Build frontend image
-        run: docker build -t nithyaganesh4343/frontend:latest ./Frontend
+      - name: Build & Push Frontend
+        run: |
+          docker build -t nithyaganesh4343/frontend:${IMAGE_TAG} ./Frontend
+          docker tag nithyaganesh4343/frontend:${IMAGE_TAG} nithyaganesh4343/frontend:latest
+          docker push nithyaganesh4343/frontend:${IMAGE_TAG}
+          docker push nithyaganesh4343/frontend:latest
 
-      - name: Push backend image
-        run: docker push nithyaganesh4343/backend:latest
-
-      - name: Push frontend image
-        run: docker push nithyaganesh4343/frontend:latest
-
-      - name: Deploy to EC2 (with secrets)
+      - name: Deploy to EC2 (with rollback + health check)
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            set -e
+
             cd ~/docker-first-cal-app
 
-            # Create .env dynamically
-            echo "PORT=${{ secrets.PORT }}" > .env
-            echo "MONGO_URI=${{ secrets.MONGO_URI }}" >> .env
-            echo "MONGO_INITDB_ROOT_USERNAME=${{ secrets.MONGO_INITDB_ROOT_USERNAME }}" >> .env
-            echo "MONGO_INITDB_ROOT_PASSWORD=${{ secrets.MONGO_INITDB_ROOT_PASSWORD }}" >> .env
-            echo "MONGO_INITDB_DATABASE=${{ secrets.MONGO_INITDB_DATABASE }}" >> .env
+            echo "🚀 Starting deployment..."
 
-            # Deploy
-            docker-compose pull
-            docker-compose up -d --remove-orphans
+            # Ensure Docker is running
+            sudo systemctl start docker
+
+            # Backup current running containers (for rollback)
+            docker ps -q > previous_containers.txt || true
+
+            # Create .env safely
+            cat <<EOF > .env
+            PORT=${{ secrets.PORT }}
+            MONGO_URI=${{ secrets.MONGO_URI }}
+            MONGO_INITDB_ROOT_USERNAME=${{ secrets.MONGO_INITDB_ROOT_USERNAME }}
+            MONGO_INITDB_ROOT_PASSWORD=${{ secrets.MONGO_INITDB_ROOT_PASSWORD }}
+            MONGO_INITDB_DATABASE=${{ secrets.MONGO_INITDB_DATABASE }}
+            EOF
+
+            # Pull latest images
+            sudo docker compose pull
+
+            # Deploy new version
+            sudo docker compose up -d --remove-orphans
+
+            echo "⏳ Waiting for services..."
+            sleep 15
+
+            # Health check (change port if needed)
+            if ! curl -f http://localhost:${{ secrets.PORT }}; then
+              echo "❌ Health check failed. Rolling back..."
+
+              # Rollback
+              if [ -s previous_containers.txt ]; then
+                sudo docker stop $(cat previous_containers.txt) || true
+                sudo docker start $(cat previous_containers.txt) || true
+              fi
+
+              exit 1
+            fi
+
+            echo "✅ Deployment successful!"
